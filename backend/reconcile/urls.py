@@ -1,6 +1,6 @@
 from django.urls import path
+from reconcile.api.views import DisagreementListView
 
-# Reconcile application URL configuration
-# Business logic endpoints will be mounted here in subsequent phases.
 urlpatterns = [
+    path('disagreements/', DisagreementListView.as_view(), name='disagreement-list'),
 ]

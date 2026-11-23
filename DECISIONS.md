@@ -230,5 +230,48 @@ Phase 4 implements the core reconciliation domain service (`backend/reconcile/se
    - Disagreements are deterministically sorted by `(record_id, reason, system_b_entry_ids[0])`.
    - Strict `Decimal` arithmetic is used throughout with no floating-point conversions.
 
+---
+
+## 12. Backend REST API, Multi-Tenancy & Redaction Policies (Phase 5)
+
+### Context
+Phase 5 exposes reconciliation discrepancies through a secure RESTful API endpoint (`GET /api/disagreements/`) enforcing multi-tenant isolation, cross-tenant data redaction, and strict parameter validation.
+
+### Decisions & Policies
+1. **Authoritative Organization Ownership Mapping:**
+   - The canonical organization mapping is strictly derived via the relational schema:
+     `Location.location_id -> Location.org_id`.
+   - Client-provided identifiers and unverified CSV fields are never trusted as proof of organization ownership.
+2. **Matched-Record Ownership Policy:**
+   - A matched record (where System A exists) belongs solely to the organization that owns its System A facility (`record.location.org_id`).
+   - For example, `REC-1077` has System A facility `LOC-102` (belonging to `ORG-A`), while its System B entry has facility `LOC-201` (belonging to `ORG-B`). Ownership of `REC-1077` and its reconciliation discrepancy belongs exclusively to `ORG-A`.
+3. **Orphan Entry Ownership Policy:**
+   - A genuine orphan System B entry (where `record_ref` does not exist anywhere in System A) belongs to the organization that owns its System B facility (`entry.location.org_id`).
+   - Example: `ENT/2026/4901` references non-existent `REC-1999` and has location `LOC-102` (`ORG-A`). It is visible exclusively to `ORG-A` and hidden from `ORG-B`.
+4. **Cross-Tenant System B Entry Isolation & Redaction Policy:**
+   - If a System B entry references a System A record owned by another organization (such as `ENT/2026/4077` referencing `REC-1077` owned by `ORG-A`), it is **strictly forbidden** from being exposed to the organization owning the B location (`ORG-B`).
+   - When requested by the owning organization (`ORG-A`), the discrepancy is returned, the owning organization's location (`LOC-102`) is preserved, but the foreign System B location (`LOC-201`) is **redacted to `null`**. Explanations and responses never leak foreign facility codes or foreign organization names.
+5. **Database-Level Tenant Filtering Strategy:**
+   - Tenant isolation is enforced in the initial SQL queries before reconciliation, never by loading all records into application memory:
+     ```python
+     # 1. Scope System A records by tenant
+     scoped_a = SystemARecord.objects.filter(location__org_id=org)
+     scoped_a_ids = list(scoped_a.values_list('record_id', flat=True))
+
+     # 2. Scope System B entries:
+     # - references this org's System A records; OR
+     # - genuine orphan belonging to this org's location
+     all_a_ids = SystemARecord.objects.values_list('record_id', flat=True)
+     scoped_b = SystemBEntry.objects.filter(
+         Q(record_ref__in=scoped_a_ids) |
+         ((Q(record_ref__isnull=True) | ~Q(record_ref__in=all_a_ids)) & Q(location__org_id=org))
+     )
+     ```
+   - Only these scoped records are passed to `ReconciliationEngine(scoped_a, scoped_b)`.
+6. **Strict Decimal Serialization:**
+   - Discrepancy values and monetary differences are serialized via DRF as decimal strings (e.g. `"1000.00"`), never floating-point numbers.
+   - Missing or uncalculable values remain `null`.
+
+
 
 

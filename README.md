@@ -23,16 +23,21 @@ DealerOS/
 │   ├── reconcile/             # Django app for reconciliation domain
 │   │   ├── __init__.py
 │   │   ├── admin.py
+│   │   ├── api/               # REST API layer (Phase 5)
+│   │   │   ├── __init__.py
+│   │   │   ├── serializers.py # DRF serializers for reconciliation outputs
+│   │   │   └── views.py       # API views with tenant isolation & query validation
 │   │   ├── apps.py
 │   │   ├── management/        # Ingestion commands (import_data)
 │   │   ├── migrations/        # Database schema migrations
 │   │   ├── models.py          # Location, SystemARecord, SystemBEntry models
 │   │   ├── services/          # Core business services
-│   │   │   └── reconciliation.py  # Domain reconciliation engine
+│   │   │   └── reconciliation.py  # Domain reconciliation engine (Phase 4)
+│   │   ├── test_api.py        # API endpoint and tenant-isolation test suite (Phase 5)
 │   │   ├── test_reconciliation.py # Engine test suite (18 test scenarios)
 │   │   ├── tests.py           # Model and importer test suite
 │   │   ├── urls.py            # API routing for reconcile endpoints
-│   │   └── views.py           # API views and controllers
+│   │   └── views.py           # Application views
 │   ├── manage.py              # Django CLI utility
 │   ├── pytest.ini             # Pytest configuration for Django
 │   ├── requirements.txt       # Python backend dependencies
@@ -165,6 +170,72 @@ DealerOS includes a standalone, independently testable reconciliation service lo
   - `LOCATION_MISMATCH`: Differing location identifiers between System A and System B.
   - `DATE_MISMATCH`: Differing transaction dates when both dates are populated.
   - `VOIDED_IN_B`: System B entry referencing a voided System A record.
+
+---
+
+## REST API Specification (Phase 5)
+
+DealerOS exposes a REST API powered by Django REST Framework at `/api/disagreements/`.
+
+### Endpoint: `GET /api/disagreements/`
+
+Retrieves the list of reconciliation disagreements scoped strictly to an organization.
+
+#### Query Parameters:
+| Parameter | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `org` | String | **Yes** | Authoritative organization identifier (e.g., `ORG-A`, `ORG-B`). Must match registered locations. Missing returns `400 Bad Request`; nonexistent returns `404 Not Found`. |
+| `reason` | String | No | Filter by discrepancy reason: `MISSING_IN_B`, `ORPHAN_IN_B`, `DUPLICATE_IN_B`, `VALUE_MISMATCH`, `LOCATION_MISMATCH`, `DATE_MISMATCH`, `VOIDED_IN_B`. Invalid reason returns `400 Bad Request`. |
+| `sort` | String | No | Sort discrepancies by: `record_id`, `value_asc`, `value_desc`, `difference_asc`, `difference_desc`. Discrepancies with null values/differences sort last. Invalid sort returns `400 Bad Request`. |
+
+#### Tenant Isolation Guarantees:
+1. **Authoritative Location Mapping:** Organization identity is derived exclusively via `Location.location_id -> Location.org_id`.
+2. **Database-Level Scoping:** Records are filtered prior to reconciliation execution using SQL `Q` expressions:
+   - System A: Filtered by `location__org_id=org`.
+   - System B: Includes entries matching the tenant's System A records OR orphan entries whose own location belongs to the tenant.
+3. **Cross-Tenant Redaction:** When a System A record in `ORG-A` mismatches against a System B entry located in `ORG-B` (e.g., `REC-1077`), the foreign location identifier is redacted (`"system_b_location": null`) and explanations are sanitized to prevent metadata leakage.
+
+#### Example Request:
+```bash
+curl -X GET "http://127.0.0.1:8000/api/disagreements/?org=ORG-A&reason=VALUE_MISMATCH&sort=difference_desc"
+```
+
+#### Example Response:
+```json
+{
+  "organization": "ORG-A",
+  "summary": {
+    "total_disagreements": 3,
+    "breakdown": {
+      "VALUE_MISMATCH": 3
+    }
+  },
+  "count": 3,
+  "disagreements": [
+    {
+      "record_id": "REC-1088",
+      "reason": "VALUE_MISMATCH",
+      "system_a_value": "89000.00",
+      "system_b_value": "87000.00",
+      "difference": "2000.00",
+      "system_a_date": "2026-03-22",
+      "system_b_date": "2026-03-22",
+      "system_a_location": "LOC-101",
+      "system_b_location": "LOC-101",
+      "system_b_entries": [
+        {
+          "entry_id": "ENT/2026/4088",
+          "recorded_on": "2026-03-22",
+          "value": "87000.00",
+          "location": "LOC-101",
+          "label": "MATCH"
+        }
+      ],
+      "explanation": "Value mismatch: System A total 89000.00 != System B total 87000.00 (diff: 2000.00)"
+    }
+  ]
+}
+```
 
 ---
 
