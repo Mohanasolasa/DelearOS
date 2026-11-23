@@ -132,16 +132,29 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         # Resolve data directory
-        data_dir_arg = options.get('data_dir')
+        data_dir_arg = options.get('data_dir') or os.environ.get('DATA_DIR')
         if data_dir_arg:
             data_dir = Path(data_dir_arg).resolve()
         else:
-            # Check parent/data first (workspace root), then BASE_DIR/data
-            candidate = settings.BASE_DIR.parent / 'data'
-            if candidate.is_dir():
-                data_dir = candidate
-            else:
-                data_dir = settings.BASE_DIR / 'data'
+            # Check multiple standard candidates:
+            # 1. BASE_DIR.parent / 'data' (root data/ when BASE_DIR is backend/)
+            # 2. BASE_DIR / 'data' (if data/ is located inside backend/)
+            # 3. Path.cwd() / 'data' (if running from repo root)
+            # 4. Path.cwd().parent / 'data' (if running from subfolder)
+            candidates = [
+                settings.BASE_DIR.parent / 'data',
+                settings.BASE_DIR / 'data',
+                Path.cwd() / 'data',
+                Path.cwd().parent / 'data',
+            ]
+            data_dir = None
+            for cand in candidates:
+                if cand.is_dir() and (cand / 'locations.csv').is_file():
+                    data_dir = cand.resolve()
+                    break
+
+            if not data_dir:
+                data_dir = (settings.BASE_DIR.parent / 'data').resolve()
 
         locations_path = Path(options['locations_file']) if options.get('locations_file') else data_dir / 'locations.csv'
         system_a_path = Path(options['system_a_file']) if options.get('system_a_file') else data_dir / 'system_a.csv'
