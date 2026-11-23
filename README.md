@@ -45,12 +45,25 @@ DealerOS/
 ├── frontend/
 │   ├── public/                # Static public assets
 │   ├── src/                   # React application source
-│   │   ├── assets/            # Component assets and images
-│   │   ├── App.css            # Main application styling
-│   │   ├── App.jsx            # Root React component
-│   │   ├── index.css          # Base design tokens and typography
+│   │   ├── components/        # UI components
+│   │   │   ├── DetailsDrawer.jsx
+│   │   │   ├── FilterBar.jsx
+│   │   │   ├── Header.jsx
+│   │   │   ├── ReconciliationTable.jsx
+│   │   │   ├── Sidebar.jsx
+│   │   │   ├── StatusBadge.jsx
+│   │   │   └── SummaryCards.jsx
+│   │   ├── services/          # API services
+│   │   │   └── api.js         # REST client connecting to /api/disagreements/
+│   │   ├── styles/            # Design system CSS
+│   │   │   └── dashboard.css  # Enterprise financial dashboard styles
+│   │   ├── utils/             # Formatting and audit helpers
+│   │   │   └── formatters.js  # INR currency and null-safe formatters
+│   │   ├── App.jsx            # Main dashboard controller
+│   │   ├── index.css          # Global typography and resets
 │   │   └── main.jsx           # React DOM bootstrap entry point
-│   ├── index.html             # HTML entry point template
+│   ├── .env.example           # Environment template (VITE_API_BASE_URL)
+│   ├── index.html             # HTML entry point with Inter font
 │   ├── package.json           # Node.js dependencies and scripts
 │   ├── package-lock.json      # Locked npm dependency tree
 │   └── vite.config.js         # Vite bundler configuration
@@ -147,10 +160,44 @@ npm run dev
 ```
 The React development server runs by default at `http://localhost:5173/`.
 
-### 4. Build for production (optional)
+### 4. Build for production
 ```bash
 npm run build
 ```
+
+### 5. Environment configuration
+Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
+```
+Default configuration:
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+---
+
+## Reconciliation Dashboard Frontend (Phase 6)
+
+DealerOS includes an enterprise financial dashboard built with React 19 and Vite, styled in the aesthetic of Stripe and Linear.
+
+### Key Capabilities:
+- **Organization Switcher:** Seamlessly toggles between `ORG-A` and `ORG-B`, triggering tenant-scoped API requests.
+- **Dynamic Metric Cards:** Displays 4 live audit metrics derived directly from backend response payloads:
+  1. *Total Disagreements*
+  2. *Missing in System B*
+  3. *Value Mismatches*
+  4. *Duplicate Entries*
+- **Filter & Sort Controls:**
+  - Reason filter: dropdown for all 7 discrepancy types (`MISSING_IN_B`, `VALUE_MISMATCH`, `DUPLICATE_IN_B`, `LOCATION_MISMATCH`, `DATE_MISMATCH`, `VOIDED_IN_B`, `ORPHAN_IN_B`).
+  - Sort order: delegates sorting to backend SQL engine (`record_id`, `value_asc`, `value_desc`, `difference_asc`, `difference_desc`).
+- **Reconciliation Audit Table:**
+  - INR currency formatting with Indian comma placement (`₹1,25,400.00`).
+  - Strict null formatting: null monetary amounts are displayed as em dash (`—`), never as `₹0.00`.
+  - Security redaction UX: cross-tenant records (e.g. `REC-1077`) show System B location as a `"Restricted"` security pill.
+- **Details Drawer (Inspection Panel):**
+  - Slide-in side drawer displaying diagnostic callouts, side-by-side financial comparison, dealership facility comparison, timeline dates, and discrete linked System B entry chips.
+  - Keyboard accessible: dismisses via `Escape` key, backdrop click, or close button.
 
 ---
 
@@ -204,38 +251,47 @@ curl -X GET "http://127.0.0.1:8000/api/disagreements/?org=ORG-A&reason=VALUE_MIS
 ```json
 {
   "organization": "ORG-A",
-  "summary": {
-    "total_disagreements": 3,
-    "breakdown": {
-      "VALUE_MISMATCH": 3
-    }
-  },
   "count": 3,
-  "disagreements": [
+  "results": [
     {
-      "record_id": "REC-1088",
       "reason": "VALUE_MISMATCH",
-      "system_a_value": "89000.00",
-      "system_b_value": "87000.00",
-      "difference": "2000.00",
-      "system_a_date": "2026-03-22",
-      "system_b_date": "2026-03-22",
-      "system_a_location": "LOC-101",
-      "system_b_location": "LOC-101",
-      "system_b_entries": [
-        {
-          "entry_id": "ENT/2026/4088",
-          "recorded_on": "2026-03-22",
-          "value": "87000.00",
-          "location": "LOC-101",
-          "label": "MATCH"
-        }
+      "record_id": "REC-1088",
+      "system_a_location": "LOC-103",
+      "system_b_location": "LOC-103",
+      "system_a_date": "2026-03-30",
+      "system_b_date": "2026-03-30",
+      "system_a_total_value": "138948.30",
+      "system_b_value": "108553.36",
+      "difference": "-30394.94",
+      "system_b_entry_ids": [
+        "ENT/2026/4088"
       ],
-      "explanation": "Value mismatch: System A total 89000.00 != System B total 87000.00 (diff: 2000.00)"
+      "explanation": "Value mismatch for record REC-1088: System A total is 138948.30, System B value is 108553.36 (difference: -30394.94)."
     }
   ]
 }
 ```
+
+---
+
+## Known Limitations
+
+1. **Authentication & Authorization:** The application currently selects tenant scope via query parameters (`?org=ORG-A`) for assessment and inspection purposes; production deployment requires JWT or session-based multi-tenant RBAC to authenticate users and bind them strictly to authorized organizations.
+2. **Read-Only Ledger Audit:** The platform is purpose-built as an automated discrepancy detection and auditing workbench. Workflow actions to mutate ledger records, post accounting adjustments, or mark dispute resolution statuses are deliberately excluded from this scope.
+3. **Single-Node SQLite Backend:** SQLite is ideal for portable, reproducible evaluation. High-concurrency enterprise workloads require migration to PostgreSQL or Cloud SQL.
+
+---
+
+## AI Agent Usage and Reflection
+
+### What did the AI agent initially get wrong?
+The AI-generated dashboard initially calculated summary cards using the filtered table dataset. Applying a reason filter therefore changed the tenant-wide KPI totals. During final inspection, this issue was identified and corrected by separating tenant-wide summary data from filtered table data.
+
+### Which part am I least confident about?
+The reconciliation engine is the area where I need more practice. It handles complex cases such as duplicate entries, valid split transactions, orphan records, missing records, blank values, and VOIDED records. I understand the implemented rules but want to improve my ability to independently debug and extend the logic.
+
+### What would I improve with one additional day?
+I would strengthen the reconciliation engine's edge-case handling, expand automated tests, improve dashboard usability, and perform production deployment testing, prioritizing correctness and reliability.
 
 ---
 

@@ -272,6 +272,39 @@ Phase 5 exposes reconciliation discrepancies through a secure RESTful API endpoi
    - Discrepancy values and monetary differences are serialized via DRF as decimal strings (e.g. `"1000.00"`), never floating-point numbers.
    - Missing or uncalculable values remain `null`.
 
+---
+
+## 13. Frontend Architecture, Design System & Financial UI (Phase 6)
+
+### Context
+Phase 6 delivers a responsive, enterprise-grade React dashboard for DealerOS inspired by financial SaaS platforms like Stripe and Linear. The UI communicates with the backend `GET /api/disagreements/` endpoint to provide multi-tenant inventory reconciliation, filtering, sorting, metrics, and inspection capabilities.
+
+### Decisions & Implementation
+1. **Design System & Palette:**
+   - **Theme:** Clean, modern enterprise light theme with high visual contrast.
+   - **Sidebar:** Deep navy (`#0c1222`) providing strong structural anchoring, with indigo active indicators and connectivity pulse.
+   - **Accent:** Indigo (`#4f46e5`) for interactive elements, focus states, and primary actions.
+   - **Surfaces & Cards:** Off-white app background (`#f8fafc`) paired with crisp white cards (`#ffffff`), subtle borders (`#e2e8f0`), and soft elevation (`--shadow-xs`, `--shadow-sm`).
+   - **Typography:** Inter sans-serif for UI labels paired with monospace fonts for identifiers, currency values, and audit codes.
+   - **Discrepancy Badges:** Muted pastel badges with clear iconography (`StatusBadge.jsx`) for each of the 7 disagreement types (`MISSING_IN_B`, `VALUE_MISMATCH`, `DUPLICATE_IN_B`, `LOCATION_MISMATCH`, `DATE_MISMATCH`, `VOIDED_IN_B`, `ORPHAN_IN_B`).
+2. **Component Architecture:**
+   - `src/services/api.js`: Centralized API service consuming `VITE_API_BASE_URL` (fallback `http://127.0.0.1:8000`). Handles parameter serialization, error extraction, and loading lifecycle.
+   - `src/components/Sidebar.jsx`: Deep navy navigation sidebar with DealerOS brand mark, section headers, active route highlighting, and production status footer.
+   - `src/components/Header.jsx`: Page title, subtitle, organization selector tabs (`ORG-A` vs `ORG-B`), and manual data refresh button.
+   - `src/components/SummaryCards.jsx`: 4 dynamic financial metric cards (Total Disagreements, Missing in System B, Value Mismatches, Duplicate Entries) derived directly from live API responses.
+   - `src/components/FilterBar.jsx`: Discrepancy reason dropdown, sort order selector (delegated to backend SQL/engine sorting), and active filter reset button.
+   - `src/components/ReconciliationTable.jsx`: Full-width audit table featuring INR currency formatting, security redaction chips, difference coloring, and empty/loading skeleton states.
+   - `src/components/DetailsDrawer.jsx`: Slide-out inspection drawer featuring diagnostic callouts, settlement variance comparisons, facility audits, event dates, and discrete linked System B entry chips. Dismissable via Close button, backdrop click, or `Escape` key.
+3. **Monetary & Data Formatting Rules:**
+   - Format: Indian Rupee (`₹`) with two decimal places (`en-IN` numbering: e.g. `₹1,25,400.00`).
+   - Null Monetary Values: Rendered as an em dash (`—`) in tables and `"Unavailable"` in the details drawer. Never displayed as `₹0.00` to prevent misleading financial interpretations.
+   - Variances: Color-coded with explicit sign prefixes (`+₹...` for positive/duplicate, `-₹...` for value reductions, neutral `₹0.00` for identical totals).
+4. **Tenant Redaction UX:**
+   - When a System B location is redacted by backend security policy (`null` on cross-tenant records like `REC-1077`), the frontend renders a dedicated `"Restricted"` pill with a shield icon. The UI never attempts to reverse-engineer or reconstruct hidden tenant identifiers.
+5. **Responsiveness:**
+   - Desktop: Persistent left sidebar, 4-column summary metric grid, full tabular view.
+   - Tablet/Mobile: Compact stacked header, 2-column or 1-column summary cards, horizontally scrollable table, and full-width drawer.
+
 
 
 
