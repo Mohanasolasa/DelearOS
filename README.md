@@ -24,9 +24,13 @@ DealerOS/
 │   │   ├── __init__.py
 │   │   ├── admin.py
 │   │   ├── apps.py
+│   │   ├── management/        # Ingestion commands (import_data)
 │   │   ├── migrations/        # Database schema migrations
-│   │   ├── models.py          # Domain data models (to be defined)
-│   │   ├── tests.py           # Test suite (pytest / Django test runner)
+│   │   ├── models.py          # Location, SystemARecord, SystemBEntry models
+│   │   ├── services/          # Core business services
+│   │   │   └── reconciliation.py  # Domain reconciliation engine
+│   │   ├── test_reconciliation.py # Engine test suite (18 test scenarios)
+│   │   ├── tests.py           # Model and importer test suite
 │   │   ├── urls.py            # API routing for reconcile endpoints
 │   │   └── views.py           # API views and controllers
 │   ├── manage.py              # Django CLI utility
@@ -142,6 +146,25 @@ The React development server runs by default at `http://localhost:5173/`.
 ```bash
 npm run build
 ```
+
+---
+
+## Reconciliation Engine (Phase 4)
+
+DealerOS includes a standalone, independently testable reconciliation service located at `backend/reconcile/services/reconciliation.py`.
+
+### Capabilities:
+- **Identifier Matching:** Matches `SystemARecord.record_id` against normalized `SystemBEntry.record_ref`.
+- **Valid Split Entries:** Automatically identifies when multiple System B entries sum exactly to a System A `total_value` (using exact `Decimal` arithmetic), distinguishing valid splits from duplicates.
+- **VOIDED Record Policy:** Evaluates voided System A records without false missing alerts; flags System B entries referencing voided records as `VOIDED_IN_B`.
+- **Independent Discrepancy Classification:**
+  - `MISSING_IN_B`: Active System A record has no entry in System B.
+  - `ORPHAN_IN_B`: System B entry references a nonexistent System A record.
+  - `DUPLICATE_IN_B`: Multiple System B entries referencing a single System A record with an unequal sum.
+  - `VALUE_MISMATCH`: Single entry value discrepancy or missing/blank monetary value (never treated as zero).
+  - `LOCATION_MISMATCH`: Differing location identifiers between System A and System B.
+  - `DATE_MISMATCH`: Differing transaction dates when both dates are populated.
+  - `VOIDED_IN_B`: System B entry referencing a voided System A record.
 
 ---
 

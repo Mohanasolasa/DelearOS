@@ -197,4 +197,38 @@ Phase 3 requires an idempotent, resilient CSV data importer implemented via a Dj
 7. **Complete Dataset Ingestion (Including Orphans):**
    - Decoupled System B modeling ensures all 121 System B entries are persisted regardless of whether a matching System A record exists.
 
+---
+
+## 11. Reconciliation Engine Architecture & Business Rules (Phase 4)
+
+### Context
+Phase 4 implements the core reconciliation domain service (`backend/reconcile/services/reconciliation.py`) comparing System A records against System B entries independently of HTTP/view layers.
+
+### Decisions & Policies
+1. **VOIDED Record Policy:**
+   - Inactive/voided transactions in System A (`state = 'VOIDED'`) are part of reconciliation audit.
+   - If a VOIDED System A record has no entries in System B, it is **not** reported as `MISSING_IN_B`.
+   - If one or more System B entries reference a VOIDED record, it is flagged with dedicated reason `VOIDED_IN_B` (rather than ordinary `VALUE_MISMATCH` or `DUPLICATE_IN_B`). This isolates erroneous billings/entries against cancelled orders for investigation while preserving both systems' records.
+2. **Valid Split-Entry Policy:**
+   - Multiple System B entries referencing a single System A record are grouped by `record_ref`.
+   - If all monetary amounts are present and their sum equals System A's `total_value` using Decimal arithmetic, the group is classified as a **valid split entry** (e.g. `REC-1055` split into `71950.93 + 107926.39 == 179877.32`) and produces **no** duplicate disagreement.
+   - If the sum differs, the record is flagged as `DUPLICATE_IN_B` with the exact difference computed.
+3. **Blank / Missing Monetary Value Policy:**
+   - Incomplete monetary values (`None`) are **never** treated as zero.
+   - Group sums are never computed with missing values.
+   - Any single or grouped entry with a `None` value is flagged as `VALUE_MISMATCH` with `difference = None`, preventing false calculations while flagging the missing data.
+4. **Multiple Disagreement Handling Strategy:**
+   - Independent discrepancies on a single record are never silently suppressed or merged into an ambiguous state.
+   - A single transaction can independently report:
+     - Monetary discrepancy (`VALUE_MISMATCH` or `DUPLICATE_IN_B`)
+     - Facility discrepancy (`LOCATION_MISMATCH`)
+     - Temporal discrepancy (`DATE_MISMATCH`)
+   - For location and date comparisons, evaluations are only made when both data points are populated, avoiding false mismatches when dates/locations are missing.
+   - Entry IDs and specific field discrepancies are retained per disagreement for surgical remediation.
+5. **Decoupled Service Layer with Deterministic Structured Output:**
+   - Logic is isolated in `ReconciliationEngine` returning `Disagreement` dataclass instances.
+   - Disagreements are deterministically sorted by `(record_id, reason, system_b_entry_ids[0])`.
+   - Strict `Decimal` arithmetic is used throughout with no floating-point conversions.
+
+
 
